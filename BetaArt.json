@@ -1,0 +1,10 @@
+{
+  "id": "BetaArt",
+  "name": "Beta Art Toggle",
+  "author": "wecreus",
+  "description": "Adds a 'Beta Art' checkbox to the card inspect screen, just like Slay the Spire 1. Toggle between current and original beta art per card. Persists between restarts.",
+  "version": "v0.1.0",
+  "has_pck": false,
+  "has_dll": true,
+  "affects_gameplay": false
+}
