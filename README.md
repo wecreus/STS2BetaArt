@@ -11,6 +11,10 @@ A Slay the Spire 2 mod that adds a **Beta Art** checkbox to the card inspect scr
 - **Per-card toggle** — enabling beta art for one card doesn't affect others
 - **Immediate refresh** — hand, compendium, and all other views update instantly when toggled
 - **Persistent** — saved to `user://betaart_enabled.txt`, independent of game save files; removing the mod leaves saves untouched
+   `betaart_enabled.txt` is located at
+   `%APPDATA%\SlayTheSpire2\betaart_enabled.txt` for Windows
+   `~/Library/Application Support/SlayTheSpire2/` for Mac
+
 
 ## Installation
 
