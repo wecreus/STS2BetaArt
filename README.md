@@ -1,5 +1,8 @@
 # Beta Art Toggle
 
+[![Beta Art Toggle](https://img.youtube.com/vi/tZYis1SgL90/maxresdefault.jpg)](https://youtu.be/tZYis1SgL90)
+
+
 A Slay the Spire 2 mod that adds a **Beta Art** checkbox to the card inspect screen. Just like Slay the Spire 1. For cards that shipped with original beta portraits, the checkbox lets you toggle between the current and beta art on a per-card basis. Your choices persist between game restarts.
 
 ## Features
