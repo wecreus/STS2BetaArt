@@ -59,7 +59,7 @@ internal static class BetaArtState
         AccessTools.Field(typeof(NTickbox), "_tickedImage");
     internal static readonly System.Reflection.FieldInfo TB_NotTickedImage =
         AccessTools.Field(typeof(NTickbox), "_notTickedImage");
-    internal static readonly System.Reflection.FieldInfo TB_BaseScale =
+    internal static readonly System.Reflection.FieldInf`o TB_BaseScale =
         AccessTools.Field(typeof(NTickbox), "_baseScale");
     internal static readonly System.Reflection.FieldInfo TB_Hsv =
         AccessTools.Field(typeof(NTickbox), "_hsv");
@@ -184,6 +184,7 @@ public static class NInspectCardScreen_Open_Patch
                 }
                 betaTickbox.Visible   = false;
                 betaTickbox.FocusMode = Control.FocusModeEnum.None;
+                RestoreUniqueNames(srcTickbox, betaTickbox);
                 __instance.AddChild(betaTickbox);
 
                 WireTickboxFields(srcTickbox, betaTickbox);
@@ -278,6 +279,19 @@ public static class NInspectCardScreen_Open_Patch
         catch (Exception e)
         {
             GD.PrintErr($"[BetaArt] Open patch failed: {e}");
+        }
+    }
+
+    private static void RestoreUniqueNames(Node src, Node dup)
+    {
+        int count = Math.Min(src.GetChildCount(), dup.GetChildCount());
+        for (int i = 0; i < count; i++)
+        {
+            var srcChild = src.GetChild(i);
+            var dupChild = dup.GetChild(i);
+            if (srcChild.UniqueNameInOwner)
+                dupChild.UniqueNameInOwner = true;
+            RestoreUniqueNames(srcChild, dupChild);
         }
     }
 
