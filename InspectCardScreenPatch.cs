@@ -53,13 +53,20 @@ internal static class BetaArtState
     internal static readonly System.Reflection.MethodInfo UpdateDisplayMethod =
         AccessTools.Method(typeof(NInspectCardScreen), "UpdateCardDisplay");
 
+    internal static void SetOwnerRecursive(Node node, Node owner)
+    {
+        if (node != owner) node.Owner = owner;
+        foreach (var child in node.GetChildren())
+            SetOwnerRecursive(child, owner);
+    }
+
     internal static readonly System.Reflection.FieldInfo TB_ImageContainer =
         AccessTools.Field(typeof(NTickbox), "_imageContainer");
     internal static readonly System.Reflection.FieldInfo TB_TickedImage =
         AccessTools.Field(typeof(NTickbox), "_tickedImage");
     internal static readonly System.Reflection.FieldInfo TB_NotTickedImage =
         AccessTools.Field(typeof(NTickbox), "_notTickedImage");
-    internal static readonly System.Reflection.FieldInf`o TB_BaseScale =
+    internal static readonly System.Reflection.FieldInfo TB_BaseScale =
         AccessTools.Field(typeof(NTickbox), "_baseScale");
     internal static readonly System.Reflection.FieldInfo TB_Hsv =
         AccessTools.Field(typeof(NTickbox), "_hsv");
@@ -173,9 +180,6 @@ public static class NInspectCardScreen_Open_Patch
                     return;
                 }
 
-                // Visible=false BEFORE AddChild: Duplicate() loses unique names so
-                // ConnectSignals() inside _Ready() fails silently; keep it hidden
-                // until manually wired so it never intercepts clicks in broken state.
                 var betaTickbox = srcTickbox.Duplicate(15) as NTickbox;
                 if (betaTickbox == null)
                 {
@@ -188,7 +192,7 @@ public static class NInspectCardScreen_Open_Patch
                 __instance.AddChild(betaTickbox);
 
                 WireTickboxFields(srcTickbox, betaTickbox);
-                HideDescendantLabels(betaTickbox); // NUpgradePreviewTickbox has "View Upgrades" baked in as Label children
+                HideDescendantLabels(betaTickbox);
 
                 betaTickbox.IsTicked = false;
                 betaTickbox.Toggled += (NTickbox tb) =>
@@ -199,7 +203,6 @@ public static class NInspectCardScreen_Open_Patch
                 betaLabel.Visible = false;
                 betaLabel.MouseFilter = Control.MouseFilterEnum.Stop;
                 __instance.AddChild(betaLabel);
-                // Copy font AFTER AddChild so theme traversal reaches the scene root.
                 if (srcLabel != null)
                 {
                     var font = srcLabel.GetThemeFont("font");
@@ -223,7 +226,6 @@ public static class NInspectCardScreen_Open_Patch
                 state.BetaTickbox = betaTickbox;
                 state.BetaLabel   = betaLabel;
 
-                // Open fires after SetCard, so initialise tickbox state now.
                 InitTickboxState(__instance, state);
                 GD.Print("[BetaArt] Open: BetaTickbox created.");
             }
@@ -253,9 +255,6 @@ public static class NInspectCardScreen_Open_Patch
                     float tbX = rightEdge + 24f;
                     tb2.GlobalPosition = new Vector2(tbX, centerY - iconSize * 0.5f);
                     tb2.Visible = true;
-
-                    // Shrink to icon size: default duplicate width is 287px (icon + hidden label area).
-                    // Leaving it wide makes the label appear visually inside the checkbox bounds.
                     tb2.Size = new Vector2(iconSize, iconSize);
 
                     if (label2 != null)
@@ -311,7 +310,6 @@ public static class NInspectCardScreen_Open_Patch
             BetaArtState.TB_ImageContainer.SetValue(dup, dupIC);
             BetaArtState.TB_BaseScale.SetValue(dup, dupIC.Scale);
 
-            // Duplicate the ShaderMaterial so hover tween on one tickbox doesn't affect the other.
             var dupMat = dupIC.Material?.Duplicate() as ShaderMaterial;
             if (dupMat != null)
             {
@@ -427,6 +425,19 @@ public static class NInspectCardScreen_UpdateCardDisplay_Patch
         {
             GD.PrintErr($"[BetaArt] UpdateCardDisplay patch failed: {e}");
         }
+    }
+}
+
+[HarmonyPatch(typeof(NTickbox), "ConnectSignals")]
+public static class NTickbox_ConnectSignals_Patch
+{
+    public static void Prefix(NTickbox __instance)
+    {
+        if (!__instance.IsInsideTree()) return;
+        if (__instance.GetChildCount() == 0 || __instance.GetChild(0).Owner != null) return;
+        var parent = __instance.GetParent();
+        if (parent != null)
+            BetaArtState.SetOwnerRecursive(__instance, parent);
     }
 }
 
