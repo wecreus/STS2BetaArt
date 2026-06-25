@@ -16,6 +16,8 @@ internal static class BetaArtState
 {
     internal static readonly ConditionalWeakTable<NInspectCardScreen, ScreenState> States = new();
     internal static readonly HashSet<string> BetaEnabled = new();
+    // Suppress Toggled signal handler while programmatically setting IsTicked
+    internal static bool SuppressToggled;
 
     private const string PrefsPath = "user://betaart_enabled.txt";
 
@@ -26,8 +28,13 @@ internal static class BetaArtState
         {
             using var f = Godot.FileAccess.Open(PrefsPath, Godot.FileAccess.ModeFlags.Read);
             foreach (var line in f.GetAsText().Split('\n'))
-                if (!string.IsNullOrWhiteSpace(line))
-                    BetaEnabled.Add(line.Trim());
+            {
+                var entry = line.Trim();
+                // Guard: only load paths that look like real beta portrait paths.
+                // Malformed entries (e.g. the card atlas root) can hang ResourceLoader on startup.
+                if (!string.IsNullOrWhiteSpace(entry) && entry.Contains("/beta/"))
+                    BetaEnabled.Add(entry);
+            }
         }
         catch (Exception e) { GD.PrintErr($"[BetaArt] LoadPrefs failed: {e}"); }
     }
@@ -72,7 +79,8 @@ internal static class BetaArtState
         AccessTools.Field(typeof(NTickbox), "_hsv");
 
     internal static bool HasBetaArt(CardModel model) =>
-        ResourceLoader.Exists(model.BetaPortraitPath);
+        model.BetaPortraitPath?.Contains("/beta/") == true
+        && ResourceLoader.Exists(model.BetaPortraitPath);
 
     internal static string GetCardKey(CardModel model) => model.BetaPortraitPath;
 
@@ -97,15 +105,18 @@ internal static class BetaArtState
 
     internal static void RevertToNormalPortrait(NCard cardNode)
     {
-        var model      = cardNode.Model;
-        var normalPath = model.BetaPortraitPath.Replace("/beta/", "/");
-        var normalTex  = ResourceLoader.Load<Texture2D>(normalPath, null, ResourceLoader.CacheMode.Reuse);
-        if (normalTex == null) return;
+        var model = cardNode.Model;
+        var key   = GetCardKey(model);
+        if (key == null) return;
 
         bool isAncient   = model.Rarity == CardRarity.Ancient;
         var portraitRect = cardNode.GetNodeOrNull<TextureRect>(isAncient ? "%AncientPortrait" : "%Portrait");
-        if (portraitRect != null)
-            portraitRect.Texture = normalTex;
+        if (portraitRect == null) return;
+
+        var normalPath = key.Replace("/beta/", "/");
+        var normalTex  = ResourceLoader.Load<Texture2D>(normalPath, null, ResourceLoader.CacheMode.Reuse);
+        if (normalTex == null) return;
+        portraitRect.Texture = normalTex;
     }
 
     internal static void RefreshMatchingCardsInScene(string betaPortraitPath, bool apply)
@@ -129,6 +140,7 @@ internal static class BetaArtState
 
     internal static void OnBetaToggled(NInspectCardScreen screen, bool pressed)
     {
+        if (SuppressToggled) return;
         if (!States.TryGetValue(screen, out var state) || state.BetaTickbox == null)
             return;
         try
@@ -218,7 +230,9 @@ public static class NInspectCardScreen_Open_Patch
                     if (e is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
                     {
                         bool next = !capturedTb.IsTicked;
+                        BetaArtState.SuppressToggled = true;
                         capturedTb.IsTicked = next;
+                        BetaArtState.SuppressToggled = false;
                         BetaArtState.OnBetaToggled(capturedScr, next);
                     }
                 };
@@ -240,6 +254,8 @@ public static class NInspectCardScreen_Open_Patch
             var tb2    = state.BetaTickbox;
             var label2 = state.BetaLabel;
 
+            var capturedState = state;
+            var capturedScr2  = __instance;
             Callable.From(() => Callable.From(() =>
             {
                 try
@@ -254,7 +270,6 @@ public static class NInspectCardScreen_Open_Patch
 
                     float tbX = rightEdge + 24f;
                     tb2.GlobalPosition = new Vector2(tbX, centerY - iconSize * 0.5f);
-                    tb2.Visible = true;
                     tb2.Size = new Vector2(iconSize, iconSize);
 
                     if (label2 != null)
@@ -262,10 +277,17 @@ public static class NInspectCardScreen_Open_Patch
                         label2.GlobalPosition = new Vector2(
                             tbX + iconSize + 8f,
                             centerY - label2.Size.Y * 0.5f);
-                        label2.Visible = true;
                     }
 
-                    state.Positioned = true;
+                    // Visibility is controlled by SetCard_Patch; sync it now based on current card.
+                    var cards2 = BetaArtState.CardsField.GetValue(capturedScr2) as List<CardModel>;
+                    var index2 = (int)(BetaArtState.IndexField.GetValue(capturedScr2) ?? 0);
+                    bool hasBeta2 = cards2 != null && index2 >= 0 && index2 < cards2.Count
+                                    && BetaArtState.HasBetaArt(cards2[index2]);
+                    tb2.Visible    = hasBeta2;
+                    if (label2 != null) label2.Visible = hasBeta2;
+
+                    capturedState.Positioned = true;
                     GD.Print($"[BetaArt] Positioned tb={tb2.GlobalPosition} size={tb2.Size}" +
                              (label2 != null ? $" label={label2.GlobalPosition} size={label2.Size} text='{label2.Text}'" : " no label"));
                 }
@@ -365,11 +387,11 @@ public static class NInspectCardScreen_Open_Patch
             var  model   = cards[index];
             bool hasBeta = BetaArtState.HasBetaArt(model);
 
-            if (hasBeta) state.BetaTickbox.Enable();
-            else         state.BetaTickbox.Disable();
-
-            state.BetaTickbox.IsTicked = hasBeta
-                && BetaArtState.BetaEnabled.Contains(BetaArtState.GetCardKey(model));
+            bool ticked = hasBeta && BetaArtState.BetaEnabled.Contains(BetaArtState.GetCardKey(model));
+            BetaArtState.SuppressToggled = true;
+            state.BetaTickbox.IsTicked = ticked;
+            BetaArtState.SuppressToggled = false;
+            // Visibility will be set by the deferred positioning callback.
         }
         catch (Exception e)
         {
@@ -396,11 +418,14 @@ public static class NInspectCardScreen_SetCard_Patch
 
             GD.Print($"[BetaArt] SetCard: {model.BetaPortraitPath}, hasBeta={hasBeta}");
 
-            if (hasBeta) state.BetaTickbox.Enable();
-            else         state.BetaTickbox.Disable();
+            // Only show tickbox + label for cards that actually have beta art.
+            state.BetaTickbox.Visible = hasBeta && state.Positioned;
+            if (state.BetaLabel != null) state.BetaLabel.Visible = hasBeta && state.Positioned;
 
-            state.BetaTickbox.IsTicked = hasBeta
-                && BetaArtState.BetaEnabled.Contains(BetaArtState.GetCardKey(model));
+            bool ticked = hasBeta && BetaArtState.BetaEnabled.Contains(BetaArtState.GetCardKey(model));
+            BetaArtState.SuppressToggled = true;
+            state.BetaTickbox.IsTicked = ticked;
+            BetaArtState.SuppressToggled = false;
         }
         catch (Exception e)
         {
@@ -418,8 +443,10 @@ public static class NInspectCardScreen_UpdateCardDisplay_Patch
         {
             var cardNode = BetaArtState.CardField.GetValue(__instance) as NCard;
             if (cardNode?.Model == null) return;
-            if (!BetaArtState.BetaEnabled.Contains(BetaArtState.GetCardKey(cardNode.Model))) return;
-            BetaArtState.ApplyBetaPortrait(cardNode);
+
+            string key = BetaArtState.GetCardKey(cardNode.Model);
+            if (BetaArtState.BetaEnabled.Contains(key))
+                BetaArtState.ApplyBetaPortrait(cardNode);
         }
         catch (Exception e)
         {
@@ -447,10 +474,45 @@ public static class NCard_UpdateVisuals_Patch
     public static void Postfix(NCard __instance)
     {
         if (__instance.Model == null) return;
-        if (!BetaArtState.BetaEnabled.Contains(BetaArtState.GetCardKey(__instance.Model))) return;
+        var key = BetaArtState.GetCardKey(__instance.Model);
+        if (key == null) return;
         try
         {
-            BetaArtState.ApplyBetaPortrait(__instance);
+            if (!__instance.IsInsideTree())
+            {
+                // Card is being set up before entering the scene tree (common during deck layout).
+                // Defer ResourceLoader calls to TreeEntered so they don't fire during the game's
+                // async startup loading, which can deadlock the resource loader on second launch.
+                if (BetaArtState.BetaEnabled.Contains(key))
+                {
+                    var capturedCard = __instance;
+                    var capturedKey  = key;
+                    void Handler()
+                    {
+                        capturedCard.TreeEntered -= Handler;
+                        if (!GodotObject.IsInstanceValid(capturedCard) || capturedCard.Model == null) return;
+                        if (BetaArtState.GetCardKey(capturedCard.Model) == capturedKey
+                            && BetaArtState.BetaEnabled.Contains(capturedKey))
+                            BetaArtState.ApplyBetaPortrait(capturedCard);
+                    }
+                    __instance.TreeEntered += Handler;
+                }
+                return;
+            }
+
+            if (BetaArtState.BetaEnabled.Contains(key))
+            {
+                BetaArtState.ApplyBetaPortrait(__instance);
+            }
+            else
+            {
+                // Portrait is still showing a beta texture but beta is disabled for this card —
+                // revert it. Catches deck cards that RefreshMatchingCardsInScene couldn't reach.
+                bool isAncient   = __instance.Model.Rarity == CardRarity.Ancient;
+                var portraitRect = __instance.GetNodeOrNull<TextureRect>(isAncient ? "%AncientPortrait" : "%Portrait");
+                if (portraitRect?.Texture?.ResourcePath?.Contains("/beta/") == true)
+                    BetaArtState.RevertToNormalPortrait(__instance);
+            }
         }
         catch (Exception e)
         {
