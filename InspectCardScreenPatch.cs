@@ -78,6 +78,22 @@ internal static class BetaArtState
     internal static readonly System.Reflection.FieldInfo TB_Hsv =
         AccessTools.Field(typeof(NTickbox), "_hsv");
 
+    internal static void SetBetaInteractable(ScreenState state, bool hasBeta, bool positioned)
+    {
+        if (state.BetaTickbox == null) return;
+        var modulate = hasBeta ? Colors.White : new Color(1, 1, 1, 0.5f);
+        var filter   = hasBeta ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
+        state.BetaTickbox.Visible     = positioned;
+        state.BetaTickbox.Modulate    = modulate;
+        state.BetaTickbox.MouseFilter = filter;
+        if (state.BetaLabel != null)
+        {
+            state.BetaLabel.Visible     = positioned;
+            state.BetaLabel.Modulate    = modulate;
+            state.BetaLabel.MouseFilter = filter;
+        }
+    }
+
     internal static bool HasBetaArt(CardModel model) =>
         model.BetaPortraitPath?.Contains("/beta/") == true
         && ResourceLoader.Exists(model.BetaPortraitPath);
@@ -279,15 +295,12 @@ public static class NInspectCardScreen_Open_Patch
                             centerY - label2.Size.Y * 0.5f);
                     }
 
-                    // Visibility is controlled by SetCard_Patch; sync it now based on current card.
                     var cards2 = BetaArtState.CardsField.GetValue(capturedScr2) as List<CardModel>;
                     var index2 = (int)(BetaArtState.IndexField.GetValue(capturedScr2) ?? 0);
                     bool hasBeta2 = cards2 != null && index2 >= 0 && index2 < cards2.Count
                                     && BetaArtState.HasBetaArt(cards2[index2]);
-                    tb2.Visible    = hasBeta2;
-                    if (label2 != null) label2.Visible = hasBeta2;
-
                     capturedState.Positioned = true;
+                    BetaArtState.SetBetaInteractable(capturedState, hasBeta2, true);
                     GD.Print($"[BetaArt] Positioned tb={tb2.GlobalPosition} size={tb2.Size}" +
                              (label2 != null ? $" label={label2.GlobalPosition} size={label2.Size} text='{label2.Text}'" : " no label"));
                 }
@@ -418,9 +431,7 @@ public static class NInspectCardScreen_SetCard_Patch
 
             GD.Print($"[BetaArt] SetCard: {model.BetaPortraitPath}, hasBeta={hasBeta}");
 
-            // Only show tickbox + label for cards that actually have beta art.
-            state.BetaTickbox.Visible = hasBeta && state.Positioned;
-            if (state.BetaLabel != null) state.BetaLabel.Visible = hasBeta && state.Positioned;
+            BetaArtState.SetBetaInteractable(state, hasBeta, state.Positioned);
 
             bool ticked = hasBeta && BetaArtState.BetaEnabled.Contains(BetaArtState.GetCardKey(model));
             BetaArtState.SuppressToggled = true;
